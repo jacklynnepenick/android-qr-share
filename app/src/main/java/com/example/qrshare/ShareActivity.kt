@@ -46,8 +46,8 @@ class ShareActivity : Activity() {
         try {
             val matrix: BitMatrix = writer.encode(text, BarcodeFormat.QR_CODE, minDimension, minDimension)
             val bitmap: Bitmap = Bitmap.createBitmap(minDimension, minDimension, Bitmap.Config.RGB_565)
-            for (x in 0..minDimension - 1) {
-                for (y in 0..minDimension - 1) {
+            for (x in 0..<minDimension) {
+                for (y in 0..<minDimension) {
                     bitmap.setPixel(x, y, if (matrix.get(x, y)) Color.BLACK else Color.WHITE)
                 }
             }

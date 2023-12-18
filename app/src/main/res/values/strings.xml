@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">QRShare</string>
-    <string name="title_activity_share">ShareActivity</string>
+    <string name="title_activity_share">Generate a QR code</string>
     <string name="qr_code_image_description">A Scannable QR Code</string>
 </resources>
