@@ -2,6 +2,10 @@
 
 This Android app hooks into the built-in "share" functionality of the device. When a user shares a URL with the app, it generates a QR code for that URL and displays it on the screen.
 
+## To install
+
+Download the APK from the releases tab and install it
+
 ## Features
 
 - **Share Integration**: Easily accessible via the Android share menu.
