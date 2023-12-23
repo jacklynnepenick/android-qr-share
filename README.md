@@ -9,11 +9,11 @@ Download the APK from the releases tab and install it
 ## Features
 
 - **Share Integration**: Easily accessible via the Android share menu.
-- **QR Code Generation**: Instantly generates a QR code from any shared URL.
+- **QR Code Generation**: Instantly generates a QR code from any shared URL or file.
 
 ## Usage
 
-1. Share a URL from any app using the Android share button.
+1. Share a URL or file from any app using the Android share button.
 2. Select the app from the list of share options.
 3. View the generated QR code on your screen.
 
@@ -27,6 +27,8 @@ Download the APK from the releases tab and install it
 ## Dependencies
 
 - ZXing ("Zebra Crossing") library for QR code generation.
+- NanoHTTPD for hosting files
+- JSCH for making the files available over the internet
 
 ## Contributing
 
