@@ -38,7 +38,3 @@ Feel free to send a PR
 
 see the `LICENSE` file for details.
 
-## Acknowledgments
-
-- Thanks to the ZXing team for their robust QR code generation library.
-
