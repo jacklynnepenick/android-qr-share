@@ -83,26 +83,6 @@ class ShareActivity : Activity() {
     }
     private var webServer: NanoHTTPD? = null
 
-    /*
-    private fun startWebServer(fileUris: List<Uri>) {
-        webServer = object : NanoHTTPD(8080) {
-            override fun serve(session: IHTTPSession): Response {
-                return try {
-                    val inputStream = contentResolver.openInputStream(fileUri)
-                    val fileName = getFileName(fileUri)
-
-                    val response = newChunkedResponse(Response.Status.OK, getMimeType(fileUri.toString()), inputStream)
-                    response.addHeader("Content-Disposition", "attachment; filename=\"$fileName\"")
-                    response
-                } catch (e: Exception) {
-                    newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Internal Server Error")
-                }
-            }
-        }
-        webServer?.start()
-    }
-    */
-
     private fun startWebServer(fileUris: List<Uri>) {
         if (fileUris.isEmpty()) {
             return
@@ -134,10 +114,11 @@ class ShareActivity : Activity() {
                             }
                         }
                         inputStream = ByteArrayInputStream(baos.toByteArray())
-                        val deviceName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
+                        val deviceName = Settings.Secure.getString(contentResolver, "bluetooth_name") ?:
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
                             Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)
                         } else {
-                            Settings.Secure.getString(contentResolver, "bluetooth_name") ?: "file"
+                            "file"
                         }
 
 
