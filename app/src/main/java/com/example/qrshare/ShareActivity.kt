@@ -7,8 +7,10 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Point
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.util.Base64
 import android.webkit.MimeTypeMap
 import android.widget.ImageView
@@ -31,10 +33,15 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.supervisorScope
 import java.io.BufferedReader
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 
 class ShareActivity : Activity() {
@@ -50,17 +57,34 @@ class ShareActivity : Activity() {
             if ("text/plain" == type) {
                 handleSendText(intent)
             } else {
-                val fileUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                val fileUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                }
                 if (fileUri != null) {
-                    startWebServer(fileUri)
+                    startWebServer(listOf(fileUri))
                     setupPortForwarding()
                 }
+            }
+        } else if (Intent.ACTION_SEND_MULTIPLE == action && type != null) {
+            val fileUris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
+            }
+            if (fileUris != null) {
+                startWebServer(fileUris)
+                setupPortForwarding()
             }
         }
     }
     private var webServer: NanoHTTPD? = null
 
-    private fun startWebServer(fileUri: Uri) {
+    /*
+    private fun startWebServer(fileUris: List<Uri>) {
         webServer = object : NanoHTTPD(8080) {
             override fun serve(session: IHTTPSession): Response {
                 return try {
@@ -77,10 +101,67 @@ class ShareActivity : Activity() {
         }
         webServer?.start()
     }
+    */
+
+    private fun startWebServer(fileUris: List<Uri>) {
+        if (fileUris.isEmpty()) {
+            return
+        }
+        webServer = object : NanoHTTPD(8080) {
+            override fun serve(session: IHTTPSession): Response {
+                return try {
+                    val inputStream: InputStream?
+                    val fileName: String
+                    val mimeType: String
+                    if (fileUris.count() == 1) {
+                        mimeType = getMimeType(fileUris[0].toString())
+                        inputStream = contentResolver.openInputStream(fileUris[0])
+                        fileName = getFileName(fileUris[0])
+                    } else {
+                        val baos = ByteArrayOutputStream()
+                        ZipOutputStream(baos).use { zos ->
+                            fileUris.forEach { uri ->
+                                @Suppress("NAME_SHADOWING")
+                                val fileName = getFileName(uri) // shadowed
+                                @Suppress("NAME_SHADOWING")
+                                val inputStream = contentResolver.openInputStream(uri) // shadowed
+                                val zipEntry = ZipEntry(fileName)
+
+                                zos.putNextEntry(zipEntry)
+                                inputStream?.copyTo(zos)
+                                zos.closeEntry()
+                                inputStream?.close()
+                            }
+                        }
+                        inputStream = ByteArrayInputStream(baos.toByteArray())
+                        val deviceName = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N_MR1) {
+                            Settings.Global.getString(contentResolver, Settings.Global.DEVICE_NAME)
+                        } else {
+                            Settings.Secure.getString(contentResolver, "bluetooth_name") ?: "file"
+                        }
+
+
+                        fileName = deviceName.replace("[\\\\/:*?\"<>|]".toRegex(), "") + ".zip"
+                        mimeType = "application/zip"
+                    }
+
+
+                    val response = newChunkedResponse(Response.Status.OK, mimeType, inputStream)
+                    response.addHeader("Content-Disposition", "attachment; filename=\"$fileName\"")
+                    response
+                } catch (e: Exception) {
+                    newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Internal Server Error")
+                }
+            }
+        }
+        webServer?.start()
+    }
+
     private fun getFileName(uri: Uri): String {
         var name = ""
         if (uri.scheme.equals("content")) {
             val cursor: Cursor? = contentResolver.query(uri, null, null, null, null)
+            @Suppress("NAME_SHADOWING")
             cursor.use { cursor ->
                 val columnIndex = cursor?.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (cursor != null && cursor.moveToFirst() && columnIndex!! >= 0) {
@@ -161,12 +242,6 @@ class ShareActivity : Activity() {
         }.start()
     }
 
-    private fun extractUrl(line: String): String {
-        val regex = Regex("https://\\S+")
-        val matchResult = regex.find(line)
-        return matchResult?.value ?: ""
-    }
-
     override fun onDestroy() {
         sshSession?.disconnect()
         webServer?.stop()
@@ -193,11 +268,18 @@ class ShareActivity : Activity() {
     }
 
     private fun generateQRCode(text: String?) {
-        val display = windowManager.defaultDisplay
-        val size = Point()
-        display.getSize(size)
-        val width = size.x
-        val height = size.y
+        val width: Int
+        val height: Int
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            width = windowManager.currentWindowMetrics.bounds.width()
+            height = windowManager.currentWindowMetrics.bounds.height()
+        } else {
+            val size = Point()
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.getSize(size)
+            width = size.x
+            height = size.y
+        }
         val minDimension = width.coerceAtMost(height)
         val writer = MultiFormatWriter()
         try {
