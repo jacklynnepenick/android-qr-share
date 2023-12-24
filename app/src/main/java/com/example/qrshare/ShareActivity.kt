@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.supervisorScope
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.InetAddress
@@ -103,12 +104,18 @@ class ShareActivity : Activity() {
         return runBlocking {
             forwardingProviders.asFlow().map { provider ->
                 flow {
-                    Socket().use { soc ->
-                        soc.connect(
-                            InetSocketAddress(InetAddress.getByName(provider.host), 22),
-                            2000
-                        )
-                        emit(provider)
+                    supervisorScope {
+                        Socket().use { soc ->
+                            try {
+                                soc.connect(
+                                    InetSocketAddress(InetAddress.getByName(provider.host), 22),
+                                    2000
+                                )
+                                emit(provider)
+                            } catch (e: Exception) {
+                                e.printStackTrace()
+                            }
+                        }
                     }
                 }.flowOn(Dispatchers.IO)
             }.flattenMerge().firstOrNull()
