@@ -20,8 +20,20 @@ import com.jcraft.jsch.HostKey
 import com.jcraft.jsch.JSch
 import com.jcraft.jsch.Session
 import fi.iki.elonen.NanoHTTPD
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flattenMerge
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.runBlocking
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 
 
 class ShareActivity : Activity() {
@@ -78,16 +90,41 @@ class ShareActivity : Activity() {
         return name
     }
 
+    data class ForwardingProvider(val host: String, val user: String, val urlRegex: String, val keyString: String)
+
+    // todo: make this a config file
+    private var forwardingProviders = listOf(
+        ForwardingProvider("serveo.net", "qr_share_app", "http://\\S+", "AAAAB3NzaC1yc2EAAAADAQABAAABAQDxYGqSKVwJpQD1F0YIhz+bd5lpl7YesKjtrn1QD1RjQcSj724lJdCwlv4J8PcLuFFtlAA8AbGQju7qWdMN9ihdHvRcWf0tSjZ+bzwYkxaCydq4JnCrbvLJPwLFaqV1NdcOzY2NVLuX5CfY8VTHrps49LnO0QpGaavqrbk+wTWDD9MHklNfJ1zSFpQAkSQnSNSYi/M2J3hX7P0G2R7dsUvNov+UgNKpc4n9+Lq5Vmcqjqo2KhFyHP0NseDLpgjaqGJq2Kvit3QowhqZkK4K77AA65CxZjdDfpjwZSuX075F9vNi0IFpFkGJW9KlrXzI4lIzSAjPZBURhUb8nZSiPuzj"),
+        ForwardingProvider("localhost.run", "nokey", "https://\\S+lhr.life", "AAAAB3NzaC1yc2EAAAADAQABAAABAQC3lJnhW1oCXuAYV9IBdcJA+Vx7AHL5S/ZQvV2fhceOAPgO2kNQZla6xvUwoE4iw8lYu3zoE1KtieCU9yInWOVI6W/wFaT/ETH1tn55T2FVsK/zaxPiHZVJGLPPdEEid0vS2p1JDfc9onZ0pNSHLl1QusIOeMUyZ2bUMMLLgw46KOT9S3s/LmxgoJ3PocVUn5rVXz/Dng7Y8jYNe4IFrZOAUsi7hNBa+OYja6ceefpDvNDEJ1BdhbYfGolBdNA7f+FNl0kfaWru4Cblr843wBe2ckO/sNqgeAMXO/qH+SSgQxUXF2AgAw+TGp3yCIyYoOPvOgvcPsQziJLmDbUuQpnH")
+    )
+
+    @OptIn(FlowPreview::class)
+    private fun getForwardingProvider(): ForwardingProvider? {
+        return runBlocking {
+            forwardingProviders.asFlow().map { provider ->
+                flow {
+                    Socket().use { soc ->
+                        soc.connect(
+                            InetSocketAddress(InetAddress.getByName(provider.host), 22),
+                            2000
+                        )
+                        emit(provider)
+                    }
+                }.flowOn(Dispatchers.IO)
+            }.flattenMerge().firstOrNull()
+        }
+    }
+
     private var sshSession: Session? = null
 
     private fun setupPortForwarding() {
         Thread {
             try {
                 val jsch = JSch()
-                val session = jsch.getSession("qr_share_app", "serveo.net", 22) ?: return@Thread
-                val keyString = "AAAAB3NzaC1yc2EAAAADAQABAAABAQDxYGqSKVwJpQD1F0YIhz+bd5lpl7YesKjtrn1QD1RjQcSj724lJdCwlv4J8PcLuFFtlAA8AbGQju7qWdMN9ihdHvRcWf0tSjZ+bzwYkxaCydq4JnCrbvLJPwLFaqV1NdcOzY2NVLuX5CfY8VTHrps49LnO0QpGaavqrbk+wTWDD9MHklNfJ1zSFpQAkSQnSNSYi/M2J3hX7P0G2R7dsUvNov+UgNKpc4n9+Lq5Vmcqjqo2KhFyHP0NseDLpgjaqGJq2Kvit3QowhqZkK4K77AA65CxZjdDfpjwZSuX075F9vNi0IFpFkGJW9KlrXzI4lIzSAjPZBURhUb8nZSiPuzj"
-                val key: ByteArray = Base64.decode(keyString, Base64.DEFAULT)
-                val hostKey = HostKey("serveo.net", key)
+                val forwardingProvider = getForwardingProvider() ?: return@Thread
+                val session = jsch.getSession(forwardingProvider.user, forwardingProvider.host, 22) ?: return@Thread
+                val key: ByteArray = Base64.decode(forwardingProvider.keyString, Base64.DEFAULT)
+                val hostKey = HostKey(forwardingProvider.host, key)
                 jsch.hostKeyRepository.add(hostKey, null)
                 // session.setConfig("StrictHostKeyChecking", "no") // Uncomment if the host key starts changing frequently
                 session.connect()
@@ -99,9 +136,11 @@ class ShareActivity : Activity() {
                 session.setPortForwardingR(80, "localhost", 8080)
 
                 var line: String
+                val regex = Regex(forwardingProvider.urlRegex)
                 while (bufferedReader.readLine().also { line = it } != null) {
-                    if (line.contains("https://")) {
-                        val url = extractUrl(line)
+                    val matchResult = regex.find(line)
+                    if (matchResult != null) {
+                        val url = matchResult.value
                         runOnUiThread {
                             generateQRCode(url)
                         }
@@ -110,7 +149,6 @@ class ShareActivity : Activity() {
                 }
 
             } catch (e: Exception) {
-                print("wtf")
                 e.printStackTrace()
             }
         }.start()
